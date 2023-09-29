@@ -18,7 +18,20 @@ box = np.array([box_length,box_length,box_length])
 @nb.njit
 def calculate_distance(r1,r2):
     return r1-r2-box*np.round((r1-r2)/box)
+@nb.njit
+def LJ(dist):
+    return 4  * (np.pow(1/dist, 12) - np.pow(dist, -6))
 
+@nb.njit
+def dLJ_dr(dist):
+    return -48  * np.pow(1/dist, 13) + 24 * np.pow(1/dist, 7)
+
+@nb.njit
+def LJ_potential(dist,cutoff):
+    if dist > cutoff:
+        return 0
+    else:
+        return LJ(dist) - LJ(cutoff) - (dist - cutoff) * dLJ_dr(cutoff)
 
 
 
