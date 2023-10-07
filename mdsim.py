@@ -20,10 +20,18 @@ EPS = 1         # energy constant in LJ
 mass = 1
 @nb.njit
 def calculate_momentum(v,m):
+    '''
+    Input: Velocity [N,3], Mass [N]
+    Return: Momentum [N,3]
+    '''
     return np.sum(m * v, axis=0)
 
 @nb.njit
 def calculate_r(r1,r2):
+    '''
+    Input: Position of two particles [3]
+    Return: r_vec [3], r_mag[1]
+    '''
     dr = r1-r2
     r_vec = dr-box*np.round((dr)/box)
     r_mag = np.sqrt(np.sum((dr)**2)) 
