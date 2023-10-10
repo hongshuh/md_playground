@@ -34,7 +34,7 @@ def calculate_r(r1,r2):
     '''
     dr = r1-r2
     r_vec = dr-box*np.round((dr)/box)
-    r_mag = np.sqrt(np.sum((dr)**2)) 
+    r_mag = np.sqrt(np.sum((r_vec)**2))
     return r_vec,r_mag
 
 @nb.njit
@@ -250,7 +250,7 @@ if __name__ == '__main__':
     print(f'Using a box with length: {box_length} and cutoff: {cutoff }')
     print(f'All files will be save into folder: {path}')
     print('====================Go !!!===================================')
-    # exit()
+    exit()
     atoms_list,momentum_list,potential_list,kinetic_list,temperature_list,pressure_list = run_md(atoms,initial_vel,initial_force,initial_potential,pressure)
     
     export_file(p=atoms_list[::10])
