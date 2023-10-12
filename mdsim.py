@@ -18,6 +18,7 @@ box = np.array([box_length,box_length,box_length])
 SIGMA = 1       # file have already non-dimensionalize
 EPS = 1         # energy constant in LJ
 mass = 1
+tau = 0.05
 @nb.njit
 def calculate_momentum(v,m):
     '''
@@ -83,7 +84,7 @@ def set_initial_vel(atoms,temperature = 100.0):
     return vel
 
 
-def calculate_system_state(atoms,vel,force_array):
+def calculate_system_state(atoms,vel):
     kinetic_energy = calculate_kinetic_energy(vel,mass)
     temperature = calculate_temperature(kinetic_energy,n=len(atoms))
     
@@ -92,7 +93,7 @@ def calculate_system_state(atoms,vel,force_array):
 
 
 @nb.njit
-def pair_loop(atoms,temperature):
+def pair_loop(atoms):
     '''
     Input: Atom Position Array [N,3]
 
@@ -102,38 +103,34 @@ def pair_loop(atoms,temperature):
     '''
     force_array = np.zeros_like(atoms)
     total_potential = 0.0
-    # kinetic_energy,temperature = calculate_system_state(atoms,vel,force_array)
-    total_pressure = atom_count * temperature / box_length**3
+    total_pressure = 0.0
     for i in range(len(atoms)):
         for j in range(len(atoms)):
             if j > i:
-                r_vec,r_mag = calculate_r(atoms[i],atoms[j])
-                # r_mag = calculate_dist(atoms[i],atoms[j])
-                
+                r_vec,r_mag = calculate_r(atoms[i],atoms[j])                
                 pair_potential = LJ_potential(r_mag)
                 total_potential += pair_potential
                 force_ij ,f_mag= lj_force(r_vec,cutoff)
-                total_pressure += 1/3/box_length**3 * r_vec@(force_ij)
+                total_pressure += 1/3/box_length**3 * r_vec @ (force_ij)
                 force_array[i] += force_ij
                 force_array[j] -= force_ij
     return force_array,total_potential,total_pressure
 
-def vv_forward(atoms,vel,force_array,dt = dt,cutoff=cutoff,box_length = box_length):
+def vv_forward(atoms,vel,force_array,dt = dt):
     vel = vel + dt / 2 * force_array/mass
     atoms += dt * vel
     atoms = apply_PBC(atoms)
-    kinetic_energy,temperature = calculate_system_state(atoms,vel,force_array)
-    force_array,total_potential,pressure = pair_loop(atoms,temperature)
+    force_array,total_potential,pressure = pair_loop(atoms)
     vel += dt / 2 * force_array/mass
-    kinetic_energy,temperature = calculate_system_state(atoms,vel,force_array)
-
+    kinetic_energy,temperature = calculate_system_state(atoms,vel)
+    pressure += atom_count * temperature / box_length**3
     return atoms,vel,force_array,kinetic_energy,temperature,pressure,total_potential
 
 def run_md(atoms,initial_vel,initial_force_array,initial_potential,pressure):
     vel,force_array = initial_vel,initial_force_array
     vel_list = [initial_vel]
     potential_list=[initial_potential]
-    kinetic_energy,temperature = calculate_system_state(atoms,vel,force_array)
+    kinetic_energy,temperature = calculate_system_state(atoms,vel)
     kinetic_list = [kinetic_energy]
     temperature_list = [temperature]
     pressure_list = [pressure]
@@ -147,7 +144,7 @@ def run_md(atoms,initial_vel,initial_force_array,initial_potential,pressure):
         temperature_list.append(temperature)
         pressure_list.append(pressure)
         atoms_list.append(atoms)
-        pbar.set_postfix_str(({f'Temperature':np.round(temperature,2) 
+        pbar.set_postfix_str(({f'Temp':np.round(temperature,2) 
                                ,'Total E': np.round(total_potential+kinetic_energy,2)
                                ,'Potential':np.round(total_potential,2)
                                ,'Pressure': np.round(pressure,2)}))
@@ -230,13 +227,16 @@ if __name__ == '__main__':
     atoms = read_txt_file('./hw3/liquid256.txt')
     path = './hw3'
     plt.close('all')
-    # r1 = np.array([0.,2.4,0.])
-    # r2 = np.array([0.0,0.,0.])
-    # r_vec,r_mag = calculate_r(r1,r2)
     atom_count = len(atoms)
     atom_type = 'Z'
+
+    
     initial_vel = set_initial_vel(atoms,temperature=temperature)
-    initial_force,initial_potential,pressure = pair_loop(atoms,temperature)
+    initial_force,initial_potential,pressure = pair_loop(atoms)
+    kinetic_energy,temperature = calculate_system_state(atoms,initial_vel)
+    pressure += atom_count * temperature / box_length**3
+
+
 
     print('============================================================')
     print(f'Simulating a LJ system with {atoms.shape[0]} particles')
@@ -250,7 +250,7 @@ if __name__ == '__main__':
     print(f'Using a box with length: {box_length} and cutoff: {cutoff }')
     print(f'All files will be save into folder: {path}')
     print('====================Go !!!===================================')
-    exit()
+    # exit()
     atoms_list,momentum_list,potential_list,kinetic_list,temperature_list,pressure_list = run_md(atoms,initial_vel,initial_force,initial_potential,pressure)
     
     export_file(p=atoms_list[::10])
