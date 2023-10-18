@@ -18,7 +18,7 @@ box = np.array([box_length,box_length,box_length])
 SIGMA = 1       # file have already non-dimensionalize
 EPS = 1         # energy constant in LJ
 mass = 1
-tau = 0.05
+tau = 0.05      # damp coefficient for thermostat
 
 
 
@@ -30,12 +30,14 @@ def calculate_momentum(v,m):
     '''
     return np.sum(m * v, axis=0)
 @nb.njit
-def calculate_msd(displacement):
+def calculate_msd(disp):
     '''
     Input: Atom displacement [N,3]
+
     Return: Mean Square Displacement [1]
     '''
-    return np.mean(np.sum(displacement**2,axis=1))
+    
+    return np.mean(np.sum(disp**2,axis=1))
 @nb.njit
 def calculate_r(r1,r2):
     '''
@@ -84,8 +86,8 @@ def calculate_temperature(ke, n):
 
 def apply_PBC(pos, box_length = box_length):
     ##TODO count how many times cross the boundary
-    pos = np.mod(pos, box_length)
-    return pos
+    new_pos = np.mod(pos, box_length)
+    return new_pos
 
 def set_initial_vel(atoms,temperature):
     half_vel = np.random.normal(0, np.sqrt(1.0*temperature), size=(len(atoms)//2, 3))
@@ -100,15 +102,17 @@ def calculate_system_state(atoms,vel):
     
     return kinetic_energy,temperature
 
-def check_eq(temp_list,is_eq,timestep,time_window = 100,threshold=0.0001):
+def check_eq(atoms,temp_list,is_eq,timestep,time_window = 100,threshold=0.00005):
     tw_temp = np.array(temp_list[-time_window:])
     mean_temp = tw_temp.mean()
     std_temp = tw_temp.std()
-    # if std_temp < 0.05:
-    if (1.0 - threshold) * t_steady < mean_temp < (1.0 + threshold) * t_steady:
-        is_eq = False
-        print(f'Turn off thermostat at timestep {timestep}')
-    return is_eq
+    if std_temp < 0.05:
+        if (1.0 - threshold) * t_steady < mean_temp < (1.0 + threshold) * t_steady:
+            is_eq = False
+            print(f'current temperature {mean_temp}')
+            print(f'Turn off thermostat at timestep {timestep}')
+    return is_eq, atoms
+    
 
 
 @nb.njit
@@ -136,15 +140,14 @@ def pair_loop(atoms):
 
 def vv_forward(atoms,vel,force_array,dt = dt):
     vel = vel + dt / 2 * force_array/mass
+    atoms += dt * vel
     displacement = dt * vel
-    mean_square_displacement = calculate_msd(displacement)
-    atoms += displacement
     atoms = apply_PBC(atoms)
     force_array,total_potential,pressure = pair_loop(atoms)
     vel += dt / 2 * force_array/mass
     kinetic_energy,temperature = calculate_system_state(atoms,vel)
     pressure += atom_count * temperature / box_length**3
-    return atoms,vel,force_array,kinetic_energy,temperature,pressure,total_potential,mean_square_displacement
+    return atoms,vel,force_array,kinetic_energy,temperature,pressure,total_potential,displacement
 
 def vv_forward_themostat(atoms,vel,force_array,xi,tau=tau,dt = dt):
     vel = vel + dt / 2 * (force_array/mass - xi * vel)
@@ -173,17 +176,20 @@ def run_md(atoms,initial_vel,initial_force_array,initial_potential,pressure,xi =
     xi_list = [0.0]
     pbar = tqdm(range(timestep))
     thermostat = True
+    origin_pos = atoms
+    total_disp = np.zeros_like(atoms)
     for i in pbar:
         if thermostat == True:
             atoms,vel,force_array,kinetic_energy,temperature,pressure,total_potential,xi \
                 = vv_forward_themostat(atoms,vel,force_array,xi,tau=tau,dt = dt)
             xi_list.append(xi)
-            if i > 1000:
-                thermostat = check_eq(temperature_list,thermostat,i)
+            thermostat,origin_pos = check_eq(atoms,temperature_list,thermostat,i)
         else:
-            atoms,vel,force_array,kinetic_energy,temperature,pressure,total_potential,msd \
+            atoms,vel,force_array,kinetic_energy,temperature,pressure,total_potential,disp \
                 = vv_forward(atoms,vel,force_array)
-            msd_list.append(msd+msd_list[-1])
+            total_disp += disp
+            msd = calculate_msd(total_disp)
+            msd_list.append(msd)
 
         
         vel_list.append(vel)
