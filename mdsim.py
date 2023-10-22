@@ -9,9 +9,9 @@ from tqdm import tqdm
 from utils import read_txt_file,write_xyz_file,Kb,Epsilon_unit,Argon_mass
 t_target = 100
 t_steady = t_target *Kb/Epsilon_unit
-temperature =  1.00*t_steady 
+temperature =  1.00 * t_steady 
 dt = 0.01
-timestep = 21000
+timestep = 40000
 box_length = 6.8
 cutoff = 2.5
 box = np.array([box_length,box_length,box_length])
@@ -102,16 +102,18 @@ def calculate_system_state(atoms,vel):
     
     return kinetic_energy,temperature
 
-def check_eq(atoms,temp_list,is_eq,timestep,time_window = 100,threshold=0.00005):
-    tw_temp = np.array(temp_list[-time_window:])
+def check_eq(kinetic_list,potential_list,temperature_list,is_eq,timestep,time_window = 100,threshold=0.00005,t_steady = t_steady):
+    # threshold = 0.005
+    tw_temp = np.array(temperature_list[-time_window:])
     mean_temp = tw_temp.mean()
     std_temp = tw_temp.std()
-    if std_temp < 0.05:
-        if (1.0 - threshold) * t_steady < mean_temp < (1.0 + threshold) * t_steady:
-            is_eq = False
-            print(f'current temperature {mean_temp}')
-            print(f'Turn off thermostat at timestep {timestep}')
-    return is_eq, atoms
+    total_e = np.array(kinetic_list) + np.array(potential_list)
+    # if std_temp < 1.:
+    if (1.0 - threshold) * t_steady < mean_temp < (1.0 + threshold) * t_steady:
+        is_eq = False
+        print(f'current temperature {mean_temp}')
+        print(f'Turn off thermostat at timestep {timestep}')
+    return is_eq
     
 
 
@@ -176,14 +178,14 @@ def run_md(atoms,initial_vel,initial_force_array,initial_potential,pressure,xi =
     xi_list = [0.0]
     pbar = tqdm(range(timestep))
     thermostat = True
-    origin_pos = atoms
     total_disp = np.zeros_like(atoms)
     for i in pbar:
         if thermostat == True:
             atoms,vel,force_array,kinetic_energy,temperature,pressure,total_potential,xi \
                 = vv_forward_themostat(atoms,vel,force_array,xi,tau=tau,dt = dt)
             xi_list.append(xi)
-            thermostat,origin_pos = check_eq(atoms,temperature_list,thermostat,i)
+            if i > 20000:
+                thermostat = check_eq(kinetic_list,potential_list,temperature_list,thermostat,i)
         else:
             atoms,vel,force_array,kinetic_energy,temperature,pressure,total_potential,disp \
                 = vv_forward(atoms,vel,force_array)
@@ -305,7 +307,7 @@ if __name__ == '__main__':
     print(f'Init momentum (x, y, z): {calculate_momentum(initial_vel,mass)}')
     print(f'Initial Pressure of the system is {pressure}')
     print(f'Initial Potential of the system is {initial_potential}')
-
+    print(f'Initial Kinetic Energy is {kinetic_energy}')
     print(f'Simulating for {timestep} steps using step size: {dt}, {timestep*dt} unit time')
     print(f'Targetting a dimensionless temperature: {t_steady}')
     # print(f'Initial density (kg/m3): {density}')
