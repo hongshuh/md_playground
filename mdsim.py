@@ -12,7 +12,7 @@ t_steady = t_target *Kb/Epsilon_unit
 temperature =  1.00 * t_steady 
 dt = 0.01
 timestep = 40000
-box_length = 6.8
+box_length = 7.4
 cutoff = 2.5
 box = np.array([box_length,box_length,box_length])
 SIGMA = 1       # file have already non-dimensionalize
@@ -89,20 +89,23 @@ def apply_PBC(pos, box_length = box_length):
     new_pos = np.mod(pos, box_length)
     return new_pos
 
-def set_initial_vel(atoms,temperature):
-    half_vel = np.random.normal(0, np.sqrt(1.0*temperature), size=(len(atoms)//2, 3))
+def set_initial_vel(pos,temperature):
+    half_vel = np.random.normal(0, np.sqrt(1.0*temperature), size=(len(pos)//2, 3))
     vel = np.concatenate([half_vel,-half_vel],axis=0)
-    assert vel.shape == atoms.shape ,'Shape of velocity should equal to position'
+    assert vel.shape == pos.shape ,'Shape of velocity should equal to position'
     return vel
 
 
-def calculate_system_state(atoms,vel):
+def calculate_system_state(pos,vel):
     kinetic_energy = calculate_kinetic_energy(vel,mass)
-    temperature = calculate_temperature(kinetic_energy,n=len(atoms))
+    temperature = calculate_temperature(kinetic_energy,n=len(pos))
     
     return kinetic_energy,temperature
 
 def check_eq(kinetic_list,potential_list,temperature_list,is_eq,timestep,time_window = 100,threshold=0.00005,t_steady = t_steady):
+    '''
+    Useless function......
+    '''
     # threshold = 0.005
     tw_temp = np.array(temperature_list[-time_window:])
     mean_temp = tw_temp.mean()
@@ -118,7 +121,7 @@ def check_eq(kinetic_list,potential_list,temperature_list,is_eq,timestep,time_wi
 
 
 @nb.njit
-def pair_loop(atoms):
+def pair_loop(pos):
     '''
     Input: Atom Position Array [N,3]
 
@@ -126,12 +129,14 @@ def pair_loop(atoms):
             Potential Energy   [1]
             Pressure [1]
     '''
-    force_array = np.zeros_like(atoms)
+    #TODO Return pair potential to calculate heat capacity
+    force_array = np.zeros_like(pos)
+    single_potntial = np.zeros_like(pos)
     total_potential = 0.0
     total_pressure = 0.0
-    for i in range(len(atoms)-1):
-        for j in range(i+1,len(atoms)):
-            r_vec,r_mag = calculate_r(atoms[i],atoms[j])                
+    for i in range(len(pos)-1):
+        for j in range(i+1,len(pos)):
+            r_vec,r_mag = calculate_r(pos[i],pos[j])                
             pair_potential = LJ_potential(r_mag)
             total_potential += pair_potential
             force_ij ,f_mag= lj_force(r_vec,cutoff)
@@ -140,55 +145,56 @@ def pair_loop(atoms):
             force_array[j] -= force_ij
     return force_array,total_potential,total_pressure
 
-def vv_forward(atoms,vel,force_array,dt = dt):
+def vv_forward(pos,vel,force_array,dt = dt):
     vel = vel + dt / 2 * force_array/mass
-    atoms += dt * vel
+    pos += dt * vel
     displacement = dt * vel
-    atoms = apply_PBC(atoms)
-    force_array,total_potential,pressure = pair_loop(atoms)
+    pos = apply_PBC(pos)
+    force_array,total_potential,pressure = pair_loop(pos)
     vel += dt / 2 * force_array/mass
-    kinetic_energy,temperature = calculate_system_state(atoms,vel)
+    kinetic_energy,temperature = calculate_system_state(pos,vel)
     pressure += atom_count * temperature / box_length**3
-    return atoms,vel,force_array,kinetic_energy,temperature,pressure,total_potential,displacement
+    return pos,vel,force_array,kinetic_energy,temperature,pressure,total_potential,displacement
 
-def vv_forward_themostat(atoms,vel,force_array,xi,tau=tau,dt = dt):
+def vv_forward_themostat(pos,vel,force_array,xi,tau=tau,dt = dt):
     vel = vel + dt / 2 * (force_array/mass - xi * vel)
-    atoms += dt * vel
-    atoms = apply_PBC(atoms)
-    force_array,total_potential,pressure = pair_loop(atoms)
+    pos += dt * vel
+    pos = apply_PBC(pos)
+    force_array,total_potential,pressure = pair_loop(pos)
     ## Half Temerature to update damp
-    kinetic_energy,temperature = calculate_system_state(atoms,vel)
+    kinetic_energy,temperature = calculate_system_state(pos,vel)
     xi = xi + dt * 1/tau**2 * (temperature/t_steady - 1)
     vel += dt / 2 * force_array/mass
     vel = vel / (1 + dt / 2 * xi)
-    kinetic_energy,temperature = calculate_system_state(atoms,vel)
+    kinetic_energy,temperature = calculate_system_state(pos,vel)
     pressure += atom_count * temperature / box_length**3
-    return atoms,vel,force_array,kinetic_energy,temperature,pressure,total_potential,xi
+    return pos,vel,force_array,kinetic_energy,temperature,pressure,total_potential,xi
 
-def run_md(atoms,initial_vel,initial_force_array,initial_potential,pressure,xi = 0):
+def run_md(pos,initial_vel,initial_force_array,initial_potential,pressure,xi = 0):
     vel,force_array = initial_vel,initial_force_array
     vel_list = [initial_vel]
     potential_list=[initial_potential]
-    kinetic_energy,temperature = calculate_system_state(atoms,vel)
+    kinetic_energy,temperature = calculate_system_state(pos,vel)
     kinetic_list = [kinetic_energy]
     temperature_list = [temperature]
     pressure_list = [pressure]
-    atoms_list = [atoms]
+    pos_list = [pos]
     msd_list = [0.0]
     xi_list = [0.0]
     pbar = tqdm(range(timestep))
     thermostat = True
-    total_disp = np.zeros_like(atoms)
+    total_disp = np.zeros_like(pos)
     for i in pbar:
         if thermostat == True:
-            atoms,vel,force_array,kinetic_energy,temperature,pressure,total_potential,xi \
-                = vv_forward_themostat(atoms,vel,force_array,xi,tau=tau,dt = dt)
+            pos,vel,force_array,kinetic_energy,temperature,pressure,total_potential,xi \
+                = vv_forward_themostat(pos,vel,force_array,xi,tau=tau,dt = dt)
             xi_list.append(xi)
-            if i > 20000:
-                thermostat = check_eq(kinetic_list,potential_list,temperature_list,thermostat,i)
+            if i*dt > 200.0:
+                # thermostat = check_eq(kinetic_list,potential_list,temperature_list,thermostat,i)
+                thermostat = False
         else:
-            atoms,vel,force_array,kinetic_energy,temperature,pressure,total_potential,disp \
-                = vv_forward(atoms,vel,force_array)
+            pos,vel,force_array,kinetic_energy,temperature,pressure,total_potential,disp \
+                = vv_forward(pos,vel,force_array)
             total_disp += disp
             msd = calculate_msd(total_disp)
             msd_list.append(msd)
@@ -199,13 +205,13 @@ def run_md(atoms,initial_vel,initial_force_array,initial_potential,pressure,xi =
         kinetic_list.append(kinetic_energy)
         temperature_list.append(temperature)
         pressure_list.append(pressure)
-        atoms_list.append(atoms)
+        pos_list.append(pos)
         pbar.set_postfix_str(({f'Thermostat':thermostat
                                ,'Temp':np.round(temperature,2) 
                                ,'Total E': np.round(total_potential+kinetic_energy,2)
                                ,'Potential':np.round(total_potential,2)
                                ,'Pressure': np.round(pressure,2)}))
-    return atoms_list,vel_list,potential_list,kinetic_list,temperature_list,pressure_list,msd_list,xi_list
+    return pos_list,vel_list,potential_list,kinetic_list,temperature_list,pressure_list,msd_list,xi_list
 
 
 
@@ -287,23 +293,23 @@ def plot_everything(vel_list,potential_list,kinetic_list,temperature_list,pressu
     return
 if __name__ == '__main__':  
     # atoms = read_txt_file('./10.txt')
-    atoms = read_txt_file('./hw3/liquid256.txt')
+    pos = read_txt_file('./hw3/liquid256.txt')
     path = './hw4'
     os.makedirs(path,exist_ok=True)
     plt.close('all')
-    atom_count = len(atoms)
+    atom_count = len(pos)
     atom_type = 'Z'
 
     
-    initial_vel = set_initial_vel(atoms,temperature=temperature)
-    initial_force,initial_potential,pressure = pair_loop(atoms)
-    kinetic_energy,temperature = calculate_system_state(atoms,initial_vel)
+    initial_vel = set_initial_vel(pos,temperature=temperature)
+    initial_force,initial_potential,pressure = pair_loop(pos)
+    kinetic_energy,temperature = calculate_system_state(pos,initial_vel)
     pressure += atom_count * temperature / box_length**3
 
 
 
     print('============================================================')
-    print(f'Simulating a LJ system with {atoms.shape[0]} particles')
+    print(f'Simulating a LJ system with {pos.shape[0]} particles')
     print(f'Init momentum (x, y, z): {calculate_momentum(initial_vel,mass)}')
     print(f'Initial Pressure of the system is {pressure}')
     print(f'Initial Potential of the system is {initial_potential}')
@@ -315,8 +321,8 @@ if __name__ == '__main__':
     print(f'All files will be save into folder: {path}')
     print('====================Go !!!===================================')
     # exit()
-    atoms_list,momentum_list,potential_list,kinetic_list,temperature_list,pressure_list,msd_list,xi_list \
-        = run_md(atoms,initial_vel,initial_force,initial_potential,pressure)
+    pos_list,momentum_list,potential_list,kinetic_list,temperature_list,pressure_list,msd_list,xi_list \
+        = run_md(pos,initial_vel,initial_force,initial_potential,pressure)
     
     xi_array = np.array(xi_list)
     plt.figure()
@@ -324,6 +330,6 @@ if __name__ == '__main__':
     plt.savefig('test.png')
 
 
-    export_file(p=atoms_list[::10])
+    export_file(p=pos_list[::10])
     
     plot_everything(momentum_list,potential_list,kinetic_list,temperature_list,pressure_list,msd_list,path)
