@@ -25,7 +25,7 @@ cutoff = 10.0
 box = np.array([box_length,box_length,box_length])
 SIGMA = 1       # file have already non-dimensionalize
 EPS = 1         # energy constant in LJ
-mass = 1
+# mass = 1
 tau = 0.05      # damp coefficient for thermostat
 
 
@@ -86,7 +86,7 @@ def lj_force(r_vec,cutoff=cutoff):
     return force,force_mag
 
 def calculate_kinetic_energy(vel,mass):
-    return np.sum(mass*vel**2 / 2.)
+    return np.sum(mass*np.sum(vel**2,axis=1) / 2.)
 
 def calculate_temperature(ke, n):
     return 2*ke / (3*(n-1))
@@ -97,9 +97,9 @@ def apply_PBC(pos, box_length = box_length):
     return new_pos
 
 def set_initial_vel(pos,temperature):
-    half_vel = np.random.normal(0, np.sqrt(1.0*temperature), size=(len(pos)//2, 3))
-    vel = np.concatenate([half_vel,-half_vel],axis=0)
-    # vel = np.zeros_like(pos) + 0.01 * np.random.rand(len(pos),3)
+    # half_vel = np.random.normal(0, np.sqrt(1.0*temperature), size=(len(pos)//2, 3))
+    # vel = np.concatenate([half_vel,-half_vel],axis=0)
+    vel = np.zeros_like(pos) 
     assert vel.shape == pos.shape ,'Shape of velocity should equal to position'
     return vel
 
@@ -232,18 +232,23 @@ def export_file(p, box_length=box_length):
         for time in p:
             out.write(str(atom_count) + '\n')
             out.write(f'Lattice="{box_length} 0.0 0.0 0.0 {box_length} 0.0 0.0 0.0 {box_length} 90.0 90.0 90.0" Properties=species:S:1:pos:R:3 Time={dt}\n')
-            for atom in time:
-                atom_string = atom_type
+            for i in range(len(time)):
+                atom_string = atom_name[i]
                 for dir in range(0, 3):
-                    atom_string += ' ' + str(atom[dir])
+                    atom_string += ' ' + str(time[i][dir])
                 out.write(atom_string)
                 out.write('\n')
 def input_pdb(path):
     pdb = PDBFile(path)
     pos = pdb.getPositions(asNumpy=True).value_in_unit(angstrom)
-
+    atom_name = []
+    mass = []
+    for atom in pdb.topology.atoms():
+        atom_name.append(atom.name)
+        mass.append(atom.element.mass.value_in_unit(dalton))
     
-    return 
+    mass_array = np.expand_dims(np.array(mass),axis=1) # reshape mass array into 2d
+    return pdb,pos,atom_name,mass_array
 
 
 def plot_everything(vel_list,potential_list,kinetic_list,temperature_list,pressure_list,msd_list,single_potential_list,path):
@@ -313,15 +318,14 @@ def plot_everything(vel_list,potential_list,kinetic_list,temperature_list,pressu
     return
 if __name__ == '__main__':  
     # atoms = read_txt_file('./10.txt')
-    pdb = PDBFile('alanine-dipeptide.pdb')
-    pos = pdb.getPositions(asNumpy=True).value_in_unit(angstrom)
+    pdb,pos,atom_name,mass = input_pdb('alanine-dipeptide.pdb')
     
     print(pos)
     path = './data'
     os.makedirs(path,exist_ok=True)
     plt.close('all')
     atom_count = len(pos)
-    atom_type = 'X'
+    
 
     # exit()
     initial_vel = set_initial_vel(pos,temperature=temperature)
@@ -347,10 +351,10 @@ if __name__ == '__main__':
     pos_list,momentum_list,potential_list,kinetic_list,temperature_list,pressure_list,msd_list,xi_list,single_potential_list \
         = run_md(pos,initial_vel,initial_force,initial_potential,pressure,single_potential)
     
-    xi_array = np.array(xi_list)
-    plt.figure()
-    plt.plot(xi_array)
-    plt.savefig('test.png')
+    # xi_array = np.array(xi_list)
+    # plt.figure()
+    # plt.plot(xi_array)
+    # plt.savefig('test.png')
 
 
     export_file(p=pos_list[::10])
